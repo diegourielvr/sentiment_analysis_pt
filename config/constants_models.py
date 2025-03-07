@@ -22,3 +22,6 @@ emotion_map = {
 REPORT_SVM_PATH = os.path.join(ROOT_DIR, 'reports', 'svm_report.csv')
 REPORT_NB_PATH = os.path.join(ROOT_DIR, 'reports', 'nb_report.csv')
 REPORT_LR_PATH = os.path.join(ROOT_DIR, 'reports', 'lr_report.csv')
+
+EMBEDDING_W2V_TIKTOK_TEXT_PATH = os.path.join(ROOT_DIR, "src", "saved_models", "embeddings", "w2v_embeddings_tiktok_text.model")
+EMBEDDING_W2V_TIKTOK_SENTENCES_PATH = os.path.join(ROOT_DIR, "src", "saved_models", "embeddings", "w2v_embeddings_tiktok_sentences.model")

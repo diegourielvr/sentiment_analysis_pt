@@ -62,3 +62,12 @@ def get_no_stopwords(documentos: list[str], sep = ' '):
                 no_stopwords.append(token.text)
         docs_no_stopwords.append(sep.join(no_stopwords))
     return docs_no_stopwords
+
+def tokenize(documentos: list[str]):
+    docs = nlp.pipe(tqdm(documentos))
+    return list(
+        map(
+            lambda doc: [token.text for token in doc], 
+            tqdm(docs)
+        )
+    )
