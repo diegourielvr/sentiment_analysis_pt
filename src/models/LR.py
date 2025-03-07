@@ -1,13 +1,35 @@
 from tqdm import tqdm
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import TensorDataset, DataLoader 
+from torch.utils.data import TensorDataset, DataLoader, Dataset
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 
 from sklearn.model_selection import train_test_split
 from config.constants_models import RANDOM_STATE, TEST_SIZE
-from src.models.utils import evaluate
+from src.models.utils import get_report 
+
+class MyDataset(Dataset):
+    def __init__(self, x_sparse, y):
+        """x_sparse es una matriz dispersa,
+        y es un arreglo o serie de pandas
+        """
+        self.x = x_sparse # matriz dispersa devuelta por fit.transform()
+        self.y = torch.tensor(y, dtype=torch.long)
+
+    def __len__(self):
+        return self.x.shape[0]
+
+    def __getitem__(self, idx):
+        # Convertir los datos a tensores solo cuando son necesarios
+        # con toarray() convertimos el vector disperso en vector denso
+        x_row = torch.tensor(
+            self.x[idx].toarray(),
+            dtype=torch.float32
+        ).squeeze()
+        y_row = self.y[idx]
+        return x_row, y_row
 
 class LogisticRegressionModel(nn.Module):
     def __init__(self, input_dim):
@@ -35,11 +57,11 @@ class OneVsAllClassifierLR:
         self.cost_function = nn.BCELoss() # Binary Cross Entropy Loss
     
     def train(self, x_train, y_train, epochs=50, batch_size=64):
-        """x_train, y_train deben ser tensores y tener la mismia longitud
+        """x_train, y_train deben ser matrices densas,
+        devueltas por fit_transform o transform y tener la misma longitud
         en la primera dimension
         """
-
-        dataset = TensorDataset(x_train, y_train)
+        dataset = MyDataset(x_train, y_train)
         dataloader = DataLoader(
             dataset,
             batch_size=batch_size,
@@ -73,22 +95,39 @@ class OneVsAllClassifierLR:
             )
             # obtener la probabilidad más alto para cada dato
             return torch.argmax(pred, dim=1)
-    def evaluate(self, x_test, y_test):
+        
+    def evaluate(self, x_test_sparse, y_test, batch_size=64):
         """x_test, y_test debe ser tensores
         """
-        y_pred = self.predict(x_test)
-        # accuracy = (y_pred==y_test).float().mean()
-        # print(f"Precisión en test: {accuracy:.4f}")
+        # Cargar datos de prueba por lotes, para reducir el consumo de RAM
+        dataset = MyDataset(x_test_sparse, y_test)
+        test_dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+        
+        # Obtener total de datos de prueba
+        total_samples = len(test_dataloader.dataset)
+        y_test_np = np.empty(total_samples, dtype=np.int64)
+        y_pred_np = np.empty(total_samples, dtype=np.int64)
+        start_idx = 0 # indice para almacenando predicciones en cada iteración
+        
+        for x_test_batch, y_test_batch in test_dataloader:
+            # Clacular tamaño del batch actual (puede ser menor el último batch)
+            batch_size_actual = y_test_batch.shape[0]
+            
+            # Realizar preidcciones
+            y_pred_batch = self.predict(x_test_batch)
+            
+            # Llenar arreglos con las predicciones
+            y_test_np[start_idx:start_idx+batch_size_actual] = y_test_batch.numpy()
+            y_pred_np[start_idx:start_idx+batch_size_actual] = y_pred_batch.numpy()
 
-        # Convertir tensores a numpy para usar con sklearn
-        y_true_np = y_test.numpy()
-        y_pred_np = y_pred.numpy()
+            # Actualizar indice para el siguiente batch
+            start_idx += batch_size_actual
 
-        report = evaluate(y_pred, y_test)
+        # Generar reporte de metricas
+        report = get_report(y_pred_np, y_test)
         return report
         
-
-class LRModel:
+class StartModel:
     def start(self,X, y, vec='TFIDF', num_classes=3, epochs=50, batch_size=64,lr=0.1):
         """x, y son columnas de un df
         """
@@ -99,25 +138,23 @@ class LRModel:
             test_size=TEST_SIZE,
             random_state=RANDOM_STATE
         )
-        print(f"shape test: {x_test.shape}")
-        if vec == 'TFIDF':
-            vectorizer = TfidfVectorizer()
-        elif vec == 'BOW':
-            vectorizer = CountVectorizer()
+        print(f"Tamaño de datos de entrenamiento: {x_train.shape[0]}")
+        print(f"Tamaño de datos de prueba: {x_test.shape[0]}")
+
+        if vec == 'TFIDF': vectorizer = TfidfVectorizer()
+        elif vec == 'BOW': vectorizer = CountVectorizer()
+        else:
+            print(f"Tipo de vectorización: {vec} no reconocido")
+            return None
+        print(f"Tipo de vectorización de datos: {vec}")
+
         # Vectorizar y convertir en matrices densas
-        x_train = vectorizer.fit_transform(x_train).toarray()
-        x_test= vectorizer.transform(x_test).toarray()
-        y_train = y_train.to_numpy()
-        y_test = y_test.to_numpy()
+        x_train = vectorizer.fit_transform(x_train)
+        x_test = vectorizer.transform(x_test)
         
-        # convertir a tensores
-        x_train_tensor = torch.tensor(x_train, dtype=torch.float32)
-        x_test_tensor = torch.tensor(x_test, dtype=torch.float32)
-        y_train_tensor = torch.tensor(y_train, dtype=torch.long)
-        y_test_tensor = torch.tensor(y_test, dtype=torch.long)
-        
-        # Get number of features
-        input_dim = x_train_tensor.shape[1]
+        # Obtener númeo de características (tamaño del vocabulario)
+        input_dim = x_train.shape[1]
+        print(f"Tamaño del vocabulario: {input_dim}")
         
         # Entrenmaiento
         model = OneVsAllClassifierLR(
@@ -128,14 +165,14 @@ class LRModel:
         
         print("Entrenando modelo...")
         model.train(
-            x_train_tensor,
-            y_train_tensor,
+            x_train,
+            y_train,
             epochs,
             batch_size,
         )
         
         print("Evaluando modelo...")
-        report = model.evaluate(x_test_tensor,y_test_tensor)
+        report = model.evaluate(x_test, y_test.to_numpy(), batch_size)
         report['model'] = f"LR_{vec}"
         return report
 

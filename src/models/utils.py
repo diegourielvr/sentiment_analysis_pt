@@ -2,7 +2,7 @@ from src.eval.plots.mc import mostrar_mc
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score
 
-def evaluate(y_pred, y_test):
+def get_report(y_pred, y_test):
     report = {
         "accuracy": accuracy_score(y_test, y_pred),
         "recall": recall_score(y_test, y_pred, average="macro"),
